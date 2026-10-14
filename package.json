@@ -5,7 +5,8 @@
   "type": "module",
   "main": "server.mjs",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "build": "npm i"
   },
   "engines": {
     "node": ">=20"
