@@ -1,6 +1,6 @@
 // Proxy locale: serve relievum.it da http://localhost:PORT senza X-Frame-Options/CSP
 // e inietta inject.js in ogni pagina HTML.
-// Avvio: node server.mjs  → apri http://localhost:3000
+// Avvio: npm start  → apri http://localhost:3000 (su Render usa la PORT assegnata)
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,9 @@ const DROP_RESPONSE_HEADERS = new Set([
   'link',
 ]);
 
+// Header di richiesta aggiunti da Render/Cloudflare da non inoltrare al target
+const DROP_REQUEST_HEADERS = /^(host|connection|accept-encoding|x-forwarded-.*|x-real-ip|true-client-ip|cf-.*|cdn-loop|rndr-.*|x-request-start)$/i;
+
 // Riscrive URL assoluti del sito target verso il proxy (relativi)
 const rewriteUrls = (text) =>
   text
@@ -41,6 +44,13 @@ const readBody = (req) =>
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Health check per Render
+    if (req.url === '/healthz') {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('ok');
+      return;
+    }
+
     // Pagina wrapper con l'iframe
     if (req.url === '/' || req.url === '/index.html') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -51,10 +61,10 @@ const server = http.createServer(async (req, res) => {
     // Path della pagina proxata: /site/... → TARGET/...
     const path = req.url.startsWith('/site') ? req.url.slice(5) || '/' : req.url;
 
-    const headers = { ...req.headers };
-    delete headers.host;
-    delete headers.connection;
-    delete headers['accept-encoding'];
+    const headers = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (!DROP_REQUEST_HEADERS.test(key)) headers[key] = value;
+    }
     if (headers.origin) headers.origin = TARGET;
     if (headers.referer) headers.referer = TARGET + new URL(headers.referer).pathname.replace(/^\/site/, '');
 
@@ -95,4 +105,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`Proxy attivo su http://localhost:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Proxy attivo sulla porta ${PORT}`));
+
+// Render invia SIGTERM ai deploy: chiude le connessioni in modo pulito
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
